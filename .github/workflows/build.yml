@@ -6,27 +6,35 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: 显示工具链
+      - name: 安装 clang 与 lld
         run: |
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-path
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang lld
+          clang --version | head -2
+          ld.lld --version | head -1
 
-      - name: 编译 dylib
+      - name: 交叉编译 iOS dylib
         run: |
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           clang -target arm64-apple-ios14.0 \
                 -dynamiclib \
-                -fobjc-arc \
+                -fuse-ld=lld \
+                -nostdlib \
                 -O2 \
-                -isysroot "$SDK" \
-                -framework Foundation \
-                -o Dump.dylib dump.m
+                -Wl,-undefined,dynamic_lookup \
+                -Wl,-platform_version,ios,14.0,14.0 \
+                -o Dump.dylib dump.c
           file Dump.dylib
           ls -lh Dump.dylib
+          python3 - <<'EOF'
+          d = open('Dump.dylib','rb').read()
+          print('magic', d[:4].hex())
+          assert d[:4] == b'\xcf\xfa\xed\xfe', '不是 arm64 Mach-O'
+          print('OK: arm64 Mach-O dylib,', len(d), 'bytes')
+          EOF
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
