@@ -1,0 +1,35 @@
+name: build-dump-dylib
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 显示工具链
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: 编译 dylib
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -target arm64-apple-ios14.0 \
+                -dynamiclib \
+                -fobjc-arc \
+                -O2 \
+                -isysroot "$SDK" \
+                -framework Foundation \
+                -o Dump.dylib dump.m
+          file Dump.dylib
+          ls -lh Dump.dylib
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dump-dylib
+          path: Dump.dylib
