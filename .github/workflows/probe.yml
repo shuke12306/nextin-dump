@@ -1,0 +1,11 @@
+name: probe-ubuntu
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "ubuntu runner works"
