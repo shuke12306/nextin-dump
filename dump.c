@@ -71,14 +71,17 @@ extern int   pthread_detach(unsigned long);
 static int g_fd = -1;
 static unsigned long g_written = 0;
 static const size_t kWindow = 8192;
-static const size_t kMaxOutput = 12u << 20;
+static const size_t kMaxOutput = 32u << 20;
 
+/* m78 专属：旧关键字表里的 "anytls" 会命中 mihomo Go 常量池数万次，
+   瞬间打满输出配额，导致扫描在到达节点列表之前就停止（只 dump 到 10 个节点）。
+   改为只命中节点定义本身的特征串。 */
 static const char *kWords[] = {
-    "idle-session-timeout",
-    "anytls",
-    "proxies:",
-    "llguanglisf",
-    "quaylight",
+    "m78yes.com",
+    "type: next-v2",
+    "type: vless",
+    "private-key:",
+    "-----BEGIN CERTIFICATE-----",
     0
 };
 
