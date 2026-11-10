@@ -70,18 +70,16 @@ extern int   pthread_detach(unsigned long);
 
 static int g_fd = -1;
 static unsigned long g_written = 0;
-static const size_t kWindow = 8192;
-static const size_t kMaxOutput = 32u << 20;
+/* v3：512KB 窗口 —— 命中点前后各 256KB，足以一次覆盖完整 rules 段 */
+static const size_t kWindow = 512u << 10;
+static const size_t kMaxOutput = 64u << 20;
 
-/* m78 专属：旧关键字表里的 "anytls" 会命中 mihomo Go 常量池数万次，
-   瞬间打满输出配额，导致扫描在到达节点列表之前就停止（只 dump 到 10 个节点）。
-   改为只命中节点定义本身的特征串。 */
+/* v3 只盯运行配置的 rules 段：开头锚点 + 结尾锚点。
+   内存里中文是真实 UTF-8，所以 "MATCH,M78星云" 用 ASCII 前缀 "MATCH,M78" 命中。
+   不再搜节点关键字，避免常量池噪声把配额打满。 */
 static const char *kWords[] = {
-    "m78yes.com",
-    "type: next-v2",
-    "type: vless",
-    "private-key:",
-    "-----BEGIN CERTIFICATE-----",
+    "DOMAIN-SUFFIX,m78star.cloud",
+    "MATCH,M78",
     0
 };
 
@@ -96,33 +94,32 @@ static void putln(const char *s) {
     put("\n");
 }
 
-// 只输出来自 [addr, addr+len) 的可打印内容
+// 输出 [addr, addr+len) 的可打印内容；分段读取，跨到不可读页时补点号保持地址对齐
 static void dump_region(mach_vm_address_t addr, size_t len) {
-    unsigned char *buf = (unsigned char *)malloc(len);
-    if (!buf) return;
-    mach_vm_size_t got = 0;
-    kern_return_t kr = mach_vm_read_overwrite(mach_task_self_, addr, len,
-                                              (mach_vm_address_t)buf, &got);
-    if (kr == KERN_SUCCESS && got > 0) {
-        char head[96];
-        snprintf(head, sizeof(head), "=== CHUNK @ 0x%llx (%llu bytes) ===",
-                 (unsigned long long)addr, (unsigned long long)got);
-        putln(head);
-        // 逐段写，避免申请额外大缓冲
-        size_t chunk = 4096;
-        for (size_t off = 0; off < got; off += chunk) {
-            size_t n = (got - off > chunk) ? chunk : (got - off);
-            unsigned char tmp[4096];
-            for (size_t i = 0; i < n; i++) {
-                unsigned char b = buf[off + i];
+    char head[96];
+    snprintf(head, sizeof(head), "=== CHUNK @ 0x%llx (%llu bytes) ===",
+             (unsigned long long)addr, (unsigned long long)len);
+    putln(head);
+
+    const size_t chunk = 16384;
+    unsigned char tmp[16384];
+    for (size_t off = 0; off < len; off += chunk) {
+        size_t n = (len - off > chunk) ? chunk : (len - off);
+        mach_vm_size_t got = 0;
+        if (mach_vm_read_overwrite(mach_task_self_, addr + off, n,
+                                   (mach_vm_address_t)tmp, &got) == KERN_SUCCESS && got > 0) {
+            for (size_t i = 0; i < (size_t)got; i++) {
+                unsigned char b = tmp[i];
                 tmp[i] = (b == '\n' || b == '\r' || (b >= 32 && b < 127)) ? b : '.';
             }
+            write(g_fd, tmp, (size_t)got);
+        } else {
+            for (size_t i = 0; i < n; i++) tmp[i] = '.';
             write(g_fd, tmp, n);
         }
-        putln("\n--- end ---");
-        g_written += got;
     }
-    free(buf);
+    putln("\n--- end ---");
+    g_written += len;
 }
 
 static void scan_once(int round) {
@@ -188,7 +185,8 @@ static void scan_once(int round) {
 
 static void *worker(void *arg) {
     sleep(5);
-    for (int r = 1; r <= 6; r++) {
+    /* v3 只跑一轮：命中点固定，重复扫描只会把同样内容再写一遍 */
+    for (int r = 1; r <= 1; r++) {
         if (g_written >= kMaxOutput) break;
         scan_once(r);
         if (g_written >= kMaxOutput) break;
